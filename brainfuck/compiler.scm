@@ -1,0 +1,75 @@
+
+(define-library (brainfuck compiler)
+  (export brainfuck->procedure)
+  (import (scheme base))
+(begin
+
+(define (bf-end _) (if #f #t))
+
+(define (inc-byte x) (modulo (+ x 1) 256))
+
+(define (dec-byte x) (modulo (- x 1) 256))
+
+(define-syntax bytevector-u8-update!
+  (syntax-rules ()
+    ((_ bv p updater)
+     (bytevector-u8-set! bv p
+       (updater (bytevector-u8-ref bv p))))))
+
+(define (brainfuck->procedure port)
+  (define memory (make-bytevector 30000 0))
+  (define proc
+    (let loop ((stack '()))
+      (let ((ch (read-char port)))
+        (cond
+         ((eof-object? ch) bf-end)
+         ((char=? #\> ch)
+          (let ((next (loop stack)))
+            (lambda(pointer)
+              (next (+ pointer 1)))))
+         ((char=? #\< ch)
+          (let ((next (loop stack)))
+            (lambda(pointer) (next (- pointer 1)))))
+         ((char=? #\+ ch)
+          (let ((next (loop stack)))
+            (lambda(pointer)
+              (bytevector-u8-update! memory pointer inc-byte)
+              (next pointer))))
+         ((char=? #\- ch)
+          (let ((next (loop stack)))
+            (lambda(pointer)
+              (bytevector-u8-update! memory pointer dec-byte)
+              (next pointer))))
+         ((char=? #\. ch)
+          (let ((next (loop stack)))
+            (lambda(pointer)
+              (write-char
+               (integer->char (bytevector-u8-ref memory pointer)))
+              (next pointer))))
+         ((char=? #\, ch)
+          (let ((next (loop stack)))
+            (lambda(pointer)
+              (bytevector-u8-set! memory pointer
+                (char->integer (read-char)))
+              (next pointer))))
+         ((char=? #\[ ch)
+          (let* ((c (cons #f #f))
+                 (next (loop (cons c stack)))
+                 (proc
+                  (lambda(pointer)
+                    (if (zero? (bytevector-u8-ref memory pointer))
+                        ((car c) pointer)
+                        (next pointer)))))
+            (set-cdr! c proc)
+            proc))
+         ((char=? #\] ch)
+          (let ((c (car stack))
+                (next (loop (cdr stack))))
+            (set-car! c next)
+            (lambda(pointer)
+              (if (zero? (bytevector-u8-ref memory pointer))
+                  (next pointer)
+                  ((cdr c) pointer)))))
+         (else (loop stack))))))
+  (lambda()(proc 0)))
+))
